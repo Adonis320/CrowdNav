@@ -13,3 +13,7 @@ venv*/
 data/
 *.mp4
 videos/
+
+Python-RVO2/
+
+*.ipynb

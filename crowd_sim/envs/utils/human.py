@@ -3,8 +3,8 @@ from crowd_sim.envs.utils.state import JointState
 
 
 class Human(Agent):
-    def __init__(self, config, section):
-        super().__init__(config, section)
+    def __init__(self, config, section, obstacles, bounds):
+        super().__init__(config, section, obstacles, bounds)
 
     def act(self, ob):
         """
@@ -12,6 +12,6 @@ class Human(Agent):
         :param ob:
         :return:
         """
-        state = JointState(self.get_full_state(), ob)
+        state = JointState(self.get_full_state(), ob, obstacles=self.obstacles)
         action = self.policy.predict(state)
         return action

@@ -92,41 +92,60 @@ class ORCA(Policy):
         """
         self_state = state.self_state
         params = self.neighbor_dist, self.max_neighbors, self.time_horizon, self.time_horizon_obst
+
+        # Recreate sim if agent count changed
         if self.sim is not None and self.sim.getNumAgents() != len(state.human_states) + 1:
             del self.sim
             self.sim = None
+
         if self.sim is None:
             self.sim = rvo2.PyRVOSimulator(self.time_step, *params, self.radius, self.max_speed)
-            self.sim.addAgent(self_state.position, *params, self_state.radius + 0.01 + self.safety_space,
-                              self_state.v_pref, self_state.velocity)
+
+            # --- NEW: add obstacles from state.obstacles (if any), then process once ---
+            # Expect rectangles as (xmin, xmax, ymin, ymax) or ObstacleRect with .as_tuple
+            obs_list = getattr(state, "obstacles", []) or []
+            for o in obs_list:
+                try:
+                    if hasattr(o, "as_tuple"):
+                        xmin, xmax, ymin, ymax = o.as_tuple
+                    else:
+                        xmin, xmax, ymin, ymax = o
+                    # CCW rectangle polygon
+                    poly = [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)]
+                    self.sim.addObstacle(poly)
+                except Exception:
+                    # ignore malformed entries silently to avoid breaking sim
+                    pass
+            if len(obs_list) > 0:
+                self.sim.processObstacles()
+            # --- END NEW ---
+
+            # add agents
+            self.sim.addAgent(self_state.position, *params,
+                            self_state.radius + 0.01 + self.safety_space,
+                            self_state.v_pref, self_state.velocity)
             for human_state in state.human_states:
-                self.sim.addAgent(human_state.position, *params, human_state.radius + 0.01 + self.safety_space,
-                                  self.max_speed, human_state.velocity)
+                self.sim.addAgent(human_state.position, *params,
+                                human_state.radius + 0.01 + self.safety_space,
+                                self.max_speed, human_state.velocity)
         else:
+            # update agent states
             self.sim.setAgentPosition(0, self_state.position)
             self.sim.setAgentVelocity(0, self_state.velocity)
             for i, human_state in enumerate(state.human_states):
                 self.sim.setAgentPosition(i + 1, human_state.position)
                 self.sim.setAgentVelocity(i + 1, human_state.velocity)
 
-        # Set the preferred velocity to be a vector of unit magnitude (speed) in the direction of the goal.
+        # preferred velocity toward goal (unchanged)
         velocity = np.array((self_state.gx - self_state.px, self_state.gy - self_state.py))
         speed = np.linalg.norm(velocity)
         pref_vel = velocity / speed if speed > 1 else velocity
 
-        # Perturb a little to avoid deadlocks due to perfect symmetry.
-        # perturb_angle = np.random.random() * 2 * np.pi
-        # perturb_dist = np.random.random() * 0.01
-        # perturb_vel = np.array((np.cos(perturb_angle), np.sin(perturb_angle))) * perturb_dist
-        # pref_vel += perturb_vel
-
         self.sim.setAgentPrefVelocity(0, tuple(pref_vel))
         for i, human_state in enumerate(state.human_states):
-            # unknown goal position of other humans
             self.sim.setAgentPrefVelocity(i + 1, (0, 0))
 
         self.sim.doStep()
         action = ActionXY(*self.sim.getAgentVelocity(0))
         self.last_state = state
-
         return action
